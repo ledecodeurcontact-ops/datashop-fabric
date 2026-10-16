@@ -1,0 +1,72 @@
+// =====================================================================
+// Modèle sémantique : SM_DataShop (Direct Lake sur WH_DataShop)
+// Toutes les mesures sont créées dans la table fact_sales
+// (ou dans une table de mesures "_Mesures" si tu préfères)
+// =====================================================================
+
+// ---------- CHIFFRE D'AFFAIRES ----------
+CA Net = SUM ( fact_sales[net_amount] )
+
+CA Brut = SUM ( fact_sales[gross_amount] )
+
+Remises = SUM ( fact_sales[discount_amount] )
+
+// ---------- MARGE ----------
+Coût des ventes = SUM ( fact_sales[cost_amount] )
+
+Marge = [CA Net] - [Coût des ventes]
+
+Taux de marge = DIVIDE ( [Marge], [CA Net] )
+
+// ---------- COMMANDES & CLIENTS ----------
+Nb commandes =
+CALCULATE (
+    DISTINCTCOUNT ( fact_sales[order_id] ),
+    fact_sales[status] = "Livrée"
+)
+
+Panier moyen = DIVIDE ( [CA Net], [Nb commandes] )
+
+Quantités vendues =
+CALCULATE ( SUM ( fact_sales[quantity] ), fact_sales[status] = "Livrée" )
+
+Clients actifs =
+CALCULATE (
+    DISTINCTCOUNT ( fact_sales[customer_id] ),
+    fact_sales[status] = "Livrée",
+    fact_sales[customer_id] <> "C00000"      // on exclut les clients non identifiés
+)
+
+Taux de retour =
+DIVIDE ( SUM ( fact_sales[is_returned] ), COUNTROWS ( fact_sales ) )
+
+// ---------- TIME INTELLIGENCE ----------
+// (pré-requis : dim_date marquée comme table de dates sur la colonne [date])
+CA N-1 = CALCULATE ( [CA Net], SAMEPERIODLASTYEAR ( dim_date[date] ) )
+
+// Piège classique : 2026 s'arrête au 30/09, il faut comparer à date égale
+CA N-1 à date =
+VAR DerniereVente =
+    CALCULATE ( MAX ( fact_sales[date_key] ), REMOVEFILTERS () )
+RETURN
+    CALCULATE ( [CA N-1], KEEPFILTERS ( dim_date[date_key] <= DerniereVente ) )
+
+Évolution vs N-1 = DIVIDE ( [CA Net] - [CA N-1 à date], [CA N-1 à date] )
+
+CA cumul annuel = TOTALYTD ( [CA Net], dim_date[date] )
+
+// ---------- OBJECTIFS (2e table de faits, grain mois x magasin) ----------
+Objectif = SUM ( fact_targets[target_amount] )
+
+% Atteinte objectif = DIVIDE ( [CA Net], [Objectif] )
+
+Écart vs objectif = [CA Net] - [Objectif]
+
+// Bonus mise en forme conditionnelle (couleur de police / icône)
+Couleur atteinte =
+SWITCH (
+    TRUE (),
+    [% Atteinte objectif] >= 1,    "#1E8E3E",   // vert
+    [% Atteinte objectif] >= 0.9,  "#F9AB00",   // orange
+    "#D93025"                                    // rouge
+)
